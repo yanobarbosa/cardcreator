@@ -1,0 +1,8 @@
+{
+  "name": "card-forge",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.15.4",
+  "scripts": { "dev": "corepack pnpm --filter @card-forge/web dev", "build": "corepack pnpm -r build", "test": "corepack pnpm -r test" },
+  "devDependencies": { "typescript": "^5.7.3", "vitest": "^3.0.5" }
+}

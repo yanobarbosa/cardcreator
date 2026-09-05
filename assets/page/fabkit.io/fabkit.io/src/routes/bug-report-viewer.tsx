@@ -1,0 +1,798 @@
+import {
+	base64ToBlob,
+	clearGallery,
+	type FabgalleryFile,
+	type FabkitFile,
+	importCardFromObject,
+	resolveStoredCardBack,
+	resolveStoredCardBackRight,
+} from "@fabkit/apps/card-creator/persistence/card-storage";
+import type { CardCreatorState } from "@fabkit/apps/card-creator/stores/card-creator";
+import { useCardCreator } from "@fabkit/apps/card-creator/stores/card-creator";
+import { ensureCustomFramesLoaded } from "@fabkit/apps/card-creator/stores/custom-frames";
+import {
+	CollapsibleJsonSection,
+	ConsoleLogEntry,
+	type FabreportConsoleEntry,
+	MetaField,
+	RestoreButton,
+	UserField,
+} from "@fabkit/platform/components/bug-report-viewer";
+import { decompressFile } from "@fabkit/shared/compression";
+import type { CardStyle } from "@fabkit/shared/config/cards/card_styles";
+import type { CardType } from "@fabkit/shared/config/cards/types";
+import { createFileRoute } from "@tanstack/react-router";
+import {
+	AlertTriangle,
+	CircleAlert,
+	CircleCheck,
+	Clock,
+	Database,
+	FileText,
+	Globe,
+	Images,
+	Layers,
+	MessageCircle,
+	Monitor,
+	RefreshCw,
+	Sliders,
+	Terminal,
+	Upload,
+	User,
+} from "lucide-react";
+import { useCallback, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { major, valid } from "semver";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface FabreportRouterMatch {
+	id: string;
+	pathname: string;
+	params: Record<string, string>;
+	search: string;
+}
+
+interface FabreportAppData {
+	state?: unknown;
+	rendering?: {
+		cardBackRenderer: string | null;
+		resolvedConfig: unknown | null;
+	};
+	gallery?: FabgalleryFile | unknown[];
+}
+
+interface Fabreport {
+	format?: "fabreport";
+	formatVersion?: string;
+	meta: {
+		appVersion: string;
+		timestamp: string;
+		url: string;
+		userAgent: string;
+		language: string;
+		screenResolution: string;
+		viewport: string;
+		timezone: string;
+		router: {
+			location: unknown;
+			matches: FabreportRouterMatch[];
+		};
+	};
+	user: {
+		whatBroke: string | null;
+		lastActions: string | null;
+		comments: string | null;
+	};
+	/** Per-app data keyed by namespace. Present in reports generated after the multi-app migration. */
+	apps?: Record<string, FabreportAppData>;
+	/** @deprecated Use apps["card-creator"].rendering. Kept for reading older reports. */
+	rendering?: {
+		cardBackRenderer: string | null;
+		resolvedConfig: unknown | null;
+	};
+	/** @deprecated Use apps["card-creator"].state. Kept for reading older reports. */
+	store?: unknown;
+	/** @deprecated Use apps["card-creator"].gallery. Kept for reading older reports. */
+	gallery?: FabgalleryFile | unknown[];
+	console: FabreportConsoleEntry[];
+	screenshot: string | null;
+	boundaryError?: {
+		message: string;
+		stack?: string;
+		componentStack?: string;
+	} | null;
+}
+
+/** Extracts card-creator-specific data from a report, with fallback for pre-multi-app reports. */
+function getCcData(report: Fabreport) {
+	const cc = report.apps?.["card-creator"];
+	return {
+		rendering: cc?.rendering ?? report.rendering,
+		store: cc?.state ?? report.store ?? null,
+		gallery: (cc?.gallery ?? report.gallery ?? []) as
+			| FabgalleryFile
+			| unknown[],
+	};
+}
+
+// ─── Route ────────────────────────────────────────────────────────────────────
+
+export const Route = createFileRoute("/bug-report-viewer")({
+	component: BugReportViewer,
+});
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+type VersionCompatibility = "compatible" | "major-mismatch" | "unknown";
+
+function checkVersionCompatibility(
+	formatVersion: string | undefined,
+): VersionCompatibility {
+	if (!formatVersion || !valid(formatVersion)) return "unknown";
+	if (!valid(__APP_VERSION__)) return "compatible";
+	return major(formatVersion) !== major(__APP_VERSION__)
+		? "major-mismatch"
+		: "compatible";
+}
+
+/** Handles both old reports (gallery is a raw array) and new reports (gallery is FabgalleryFile). */
+function getGalleryCards(
+	gallery: FabgalleryFile | unknown[],
+): FabkitFile[] | unknown[] {
+	if (Array.isArray(gallery)) return gallery;
+	return gallery.cards;
+}
+
+/** Restores serialized store state into the card creator. */
+async function restoreStore(raw: unknown): Promise<void> {
+	const s = raw as Record<string, unknown>;
+
+	// resolveStoredCardBack(Right) below resolve custom-frame ids synchronously
+	// against the registry, same as deserializeCardState — it must be hydrated
+	// first, or a report captured with a real custom frame would incorrectly
+	// resolve as "missing" here.
+	await ensureCustomFramesLoaded();
+
+	const [artwork, overlay, meldHalfAArtwork, meldHalfBArtwork] =
+		await Promise.all([
+			typeof s.CardArtwork === "string"
+				? base64ToBlob(s.CardArtwork)
+				: Promise.resolve(null),
+			typeof s.CardOverlay === "string"
+				? base64ToBlob(s.CardOverlay)
+				: Promise.resolve(null),
+			typeof (s.meldHalfA as { CardArtwork?: unknown } | undefined)
+				?.CardArtwork === "string"
+				? base64ToBlob((s.meldHalfA as { CardArtwork: string }).CardArtwork)
+				: Promise.resolve(null),
+			typeof (s.meldHalfB as { CardArtwork?: unknown } | undefined)
+				?.CardArtwork === "string"
+				? base64ToBlob((s.meldHalfB as { CardArtwork: string }).CardArtwork)
+				: Promise.resolve(null),
+		]);
+
+	const cardType = (s.CardType as CardType | undefined) ?? null;
+	const cardBackStyle = (s.CardBackStyle as CardStyle | undefined) ?? "dented";
+
+	// describeCardBackForReport (index.ts) serializes CardBack/CardBackRight
+	// down to {id, name, type, dented, renderer, missing} — no `images` array.
+	// Resolving through the SAME sign-discriminated logic deserializeCardState
+	// uses (rather than a stock-only CardBacks.find, and rather than trusting
+	// the report's own object shape) is required for two reasons: it rebuilds
+	// a full CardCreatorCardBack (with `images`) so the renderer doesn't crash
+	// on a missing `images` array, and it correctly turns an unresolvable
+	// negative (custom-frame) id into a missing-frame placeholder instead of
+	// silently substituting a stock frame — the same data-loss bug this
+	// resolver was built elsewhere in the app to prevent.
+	const cardBackRaw = s.CardBack as { id: number } | null;
+	const cardBackRightRaw = s.CardBackRight as { id: number } | null;
+	const cardBack = cardBackRaw
+		? resolveStoredCardBack(cardBackRaw.id, cardType, cardBackStyle)
+		: null;
+	const cardBackRight =
+		cardType === "meld" || !cardBackRightRaw
+			? null
+			: resolveStoredCardBackRight(
+					cardBackRightRaw.id,
+					cardType,
+					cardBackStyle,
+				);
+
+	useCardCreator.getState().loadCard({
+		...(s as Partial<CardCreatorState>),
+		CardArtwork: artwork,
+		CardOverlay: overlay,
+		CardBack: cardBack,
+		CardBackRight: cardBackRight,
+		meldHalfA:
+			s.meldHalfA && typeof s.meldHalfA === "object"
+				? {
+						...(s.meldHalfA as CardCreatorState["meldHalfA"]),
+						CardArtwork: meldHalfAArtwork,
+					}
+				: undefined,
+		meldHalfB:
+			s.meldHalfB && typeof s.meldHalfB === "object"
+				? {
+						...(s.meldHalfB as CardCreatorState["meldHalfB"]),
+						CardArtwork: meldHalfBArtwork,
+					}
+				: undefined,
+	});
+}
+
+async function restoreGallery(
+	gallery: FabgalleryFile | unknown[],
+): Promise<void> {
+	await clearGallery();
+	const cards = getGalleryCards(gallery);
+	for (const card of cards) {
+		await importCardFromObject(card as FabkitFile);
+	}
+}
+
+function buildClaudePrompt(report: Fabreport): string {
+	const lines: string[] = [
+		`I'm debugging a bug report from FABKIT, app version (https://github.com/FABKIT/FABKIT/commit/${report.meta.appVersion}).`,
+		"",
+	];
+
+	const { whatBroke, lastActions, comments } = report.user;
+	if (whatBroke) lines.push(`What broke: ${whatBroke ?? "unspecified"}`);
+	if (lastActions)
+		lines.push(`Last actions before the bug: ${lastActions ?? "unspecified"}`);
+	if (comments) lines.push(`Additional comments: ${comments ?? "unspecified"}`);
+	lines.push("");
+
+	if (report.boundaryError) {
+		lines.push("## Crash Error");
+		lines.push(`Message: ${report.boundaryError.message}`);
+		if (report.boundaryError.stack) {
+			const stack = report.boundaryError.stack.slice(0, 1500);
+			lines.push("");
+			lines.push(`<stack_trace>`);
+			lines.push(`${stack}`);
+			lines.push("</stack_trace>");
+		}
+		lines.push("");
+	}
+
+	const errors = report.console.filter((e) => e.level === "error").slice(0, 5);
+	const warns = report.console.filter((e) => e.level === "warn").slice(0, 3);
+	const unhandled = report.console
+		.filter((e) => e.level === "unhandled")
+		.slice(0, 3);
+
+	if (errors.length > 0) {
+		lines.push("## Console Errors");
+		for (const e of errors) {
+			lines.push(`- ${e.message}`);
+			if (e.stack) lines.push(`  ${e.stack.split("\n")[1]?.trim() ?? ""}`);
+		}
+		lines.push("");
+	}
+
+	if (unhandled.length > 0) {
+		lines.push("## Unhandled Rejections");
+		for (const e of unhandled) lines.push(`- ${e.message}`);
+		lines.push("");
+	}
+
+	if (warns.length > 0) {
+		lines.push("## Console Warnings");
+		for (const e of warns) lines.push(`- ${e.message}`);
+		lines.push("");
+	}
+
+	const activeRoute =
+		report.meta.router.matches.at(-1)?.pathname ?? report.meta.url;
+	lines.push("## Environment");
+	lines.push(`- App URL: ${report.meta.url}`);
+	lines.push(`- Active route: ${activeRoute}`);
+	lines.push(`- User agent: ${report.meta.userAgent}`);
+	lines.push(`- Viewport: ${report.meta.viewport}`);
+	lines.push(`- Language: ${report.meta.language}`);
+	lines.push("");
+
+	lines.push(
+		"Please help diagnose what caused this issue and suggest possible fixes.",
+	);
+
+	return lines.join("\n");
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+function BugReportViewer() {
+	const { t } = useTranslation("platform");
+	const [report, setReport] = useState<Fabreport | null>(null);
+	const [isDragging, setIsDragging] = useState(false);
+	const [storeExpanded, setStoreExpanded] = useState(false);
+	const [galleryExpanded, setGalleryExpanded] = useState(false);
+	const [restoringStore, setRestoringStore] = useState(false);
+	const [restoringGallery, setRestoringGallery] = useState(false);
+	const fileInputRef = useRef<HTMLInputElement>(null);
+
+	const loadFile = useCallback(async (file: File) => {
+		try {
+			const text = await decompressFile(file);
+			const parsed = JSON.parse(text) as Fabreport;
+			setReport(parsed);
+			console.debug("loading stack remapping");
+			const { remapStacks } = await import("@fabkit/platform/stack-remap");
+			const remapped = await remapStacks(parsed);
+			setReport(remapped);
+		} catch {
+			// Silently ignore invalid files — user will see no report loaded.
+		}
+	}, []);
+
+	const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const file = e.target.files?.[0];
+		if (file) loadFile(file);
+	};
+
+	const handleDrop = useCallback(
+		(e: React.DragEvent) => {
+			e.preventDefault();
+			setIsDragging(false);
+			const file = e.dataTransfer.files[0];
+			if (file) loadFile(file);
+		},
+		[loadFile],
+	);
+
+	const handleDragOver = (e: React.DragEvent) => {
+		e.preventDefault();
+		setIsDragging(true);
+	};
+
+	const handleDragLeave = () => setIsDragging(false);
+
+	const reset = () => {
+		setReport(null);
+		if (fileInputRef.current) fileInputRef.current.value = "";
+	};
+
+	const handleRestoreStore = async () => {
+		if (!report) return;
+		// Reports embed images at preview resolution only (see
+		// exportCardToObject's includeFullResImages) — restoring can never bring
+		// back full-resolution artwork/overlay, so this must be explicit rather
+		// than a silent downgrade.
+		if (!confirm(t("bug_report_viewer.restore_store_warning"))) return;
+		setRestoringStore(true);
+		try {
+			await restoreStore(ccData.store);
+		} finally {
+			setRestoringStore(false);
+		}
+	};
+
+	const handleRestoreGallery = async () => {
+		if (!report) return;
+		// Same image-loss caveat as restore_store, PLUS this replaces the local
+		// gallery entirely (restoreGallery calls clearGallery() first) — both
+		// need to be explicit before an irreversible action.
+		if (!confirm(t("bug_report_viewer.restore_gallery_warning"))) return;
+		setRestoringGallery(true);
+		try {
+			await restoreGallery(ccData.gallery);
+		} finally {
+			setRestoringGallery(false);
+		}
+	};
+
+	if (!report) {
+		return (
+			<div className="flex min-h-[calc(100vh-8rem)] items-center justify-center px-4 py-12">
+				<div className="w-full max-w-lg">
+					<div className="mb-8 text-center">
+						<div className="mb-4 flex justify-center">
+							<div className="rounded-full border-2 border-border-primary bg-surface-muted p-4">
+								<FileText className="h-8 w-8 text-heading" />
+							</div>
+						</div>
+						<h1 className="text-3xl font-bold text-heading">
+							{t("bug_report_viewer.title")}
+						</h1>
+						<p className="mt-2 text-muted">{t("bug_report_viewer.subtitle")}</p>
+					</div>
+
+					{/** biome-ignore lint/a11y/useKeyWithClickEvents: We don't need the key event for this div */}
+					{/** biome-ignore lint/a11y/noStaticElementInteractions: it's okay if this is static */}
+					<div
+						onDrop={handleDrop}
+						onDragOver={handleDragOver}
+						onDragLeave={handleDragLeave}
+						onClick={() => fileInputRef.current?.click()}
+						className={`cursor-pointer rounded-xl border-2 border-dashed p-12 text-center transition-all duration-200 ${
+							isDragging
+								? "border-primary bg-primary/5"
+								: "border-border-primary bg-surface hover:border-primary/50 hover:bg-surface-muted"
+						}`}
+					>
+						<Upload className="mx-auto mb-4 h-10 w-10 text-muted" />
+						<p className="text-lg font-medium text-body">
+							{t("bug_report_viewer.upload_prompt")}
+						</p>
+						<p className="mt-1 text-sm text-subtle">
+							{t("bug_report_viewer.upload_hint")}
+						</p>
+						<input
+							ref={fileInputRef}
+							type="file"
+							accept=".fabreport"
+							className="hidden"
+							onChange={handleFileChange}
+						/>
+					</div>
+				</div>
+			</div>
+		);
+	}
+
+	const errorCount = report.console.filter((e) => e.level === "error").length;
+	const warnCount = report.console.filter((e) => e.level === "warn").length;
+	const ccData = getCcData(report);
+	const galleryCards = getGalleryCards(ccData.gallery);
+	const versionCompat = checkVersionCompatibility(
+		report.formatVersion ?? report.meta.appVersion,
+	);
+
+	return (
+		<div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+			{/* Header */}
+			<div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+				<div>
+					<div className="flex flex-wrap items-center gap-3">
+						<h1 className="text-2xl font-bold text-heading">
+							{t("bug_report_viewer.title")}
+						</h1>
+						<a
+							href={`https://github.com/FABKIT/FABKIT/tree/v${report.meta.appVersion}`}
+							target="_blank"
+							rel="noreferrer"
+							className="rounded-full border border-border-primary bg-surface-muted px-3 py-0.5 font-mono text-xs text-muted hover:text-heading transition-colors"
+						>
+							v{report.meta.appVersion}
+						</a>
+						{errorCount > 0 && (
+							<span className="rounded-full bg-red-500/10 px-3 py-0.5 text-xs font-medium text-red-500">
+								{errorCount} {t("bug_report_viewer.errors")}
+							</span>
+						)}
+						{warnCount > 0 && (
+							<span className="rounded-full bg-amber-500/10 px-3 py-0.5 text-xs font-medium text-amber-500">
+								{warnCount} {t("bug_report_viewer.warnings")}
+							</span>
+						)}
+					</div>
+					<div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-subtle">
+						<span className="flex items-center gap-1.5">
+							<Clock className="h-3.5 w-3.5" />
+							{new Date(report.meta.timestamp).toLocaleString()}
+						</span>
+						<span className="flex items-center gap-1.5">
+							<Globe className="h-3.5 w-3.5" />
+							<span className="max-w-xs truncate font-mono text-xs">
+								{report.meta.url}
+							</span>
+						</span>
+					</div>
+				</div>
+				<div className="flex items-center gap-2">
+					<a
+						href={`https://claude.ai/new?q=${encodeURIComponent(buildClaudePrompt(report))}`}
+						target="_blank"
+						rel="noopener noreferrer"
+						className="flex items-center gap-2 rounded-lg border border-border-primary bg-orange-300 px-4 py-2 text-sm text-white transition-colors hover:bg-orange-400"
+					>
+						<MessageCircle className="h-4 w-4" />
+						{t("bug_report_viewer.ask_claude")}
+					</a>
+					<button
+						type="button"
+						onClick={reset}
+						className="flex items-center gap-2 rounded-lg border border-border-primary bg-surface px-4 py-2 text-sm text-muted transition-colors hover:bg-surface-muted hover:text-body"
+					>
+						<RefreshCw className="h-4 w-4" />
+						{t("bug_report_viewer.load_another")}
+					</button>
+				</div>
+			</div>
+
+			{versionCompat !== "compatible" && (
+				<div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+					<AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" />
+					<p className="text-sm text-amber-500">
+						{t("bug_report_viewer.version_mismatch")}
+					</p>
+				</div>
+			)}
+
+			<div className="space-y-6">
+				{/* User Description */}
+				<div className="rounded-lg border-2 border-border-primary bg-surface shadow-lg">
+					<div className="border-b border-border-primary bg-surface-muted px-6 py-4">
+						<div className="flex items-center gap-3">
+							<User className="h-5 w-5 text-heading" />
+							<h2 className="text-xl font-semibold text-heading">
+								{t("bug_report_viewer.section_user")}
+							</h2>
+						</div>
+					</div>
+					<div className="grid gap-4 p-6 sm:grid-cols-3">
+						<UserField
+							label={t("bug_report_viewer.what_broke")}
+							value={report.user.whatBroke}
+							emptyLabel={t("bug_report_viewer.not_provided")}
+						/>
+						<UserField
+							label={t("bug_report_viewer.last_actions")}
+							value={report.user.lastActions}
+							emptyLabel={t("bug_report_viewer.not_provided")}
+						/>
+						<UserField
+							label={t("bug_report_viewer.comments")}
+							value={report.user.comments}
+							emptyLabel={t("bug_report_viewer.not_provided")}
+						/>
+					</div>
+				</div>
+
+				{/* Console Logs */}
+				<div className="rounded-lg border-2 border-border-primary bg-surface shadow-lg">
+					<div className="border-b border-border-primary bg-surface-muted px-6 py-4">
+						<div className="flex items-center justify-between">
+							<div className="flex items-center gap-3">
+								<Terminal className="h-5 w-5 text-heading" />
+								<h2 className="text-xl font-semibold text-heading">
+									{t("bug_report_viewer.section_console")}
+								</h2>
+							</div>
+							<span className="text-sm text-subtle">
+								{report.console.length} {t("bug_report_viewer.entries")}
+							</span>
+						</div>
+					</div>
+					<div className="max-h-96 overflow-y-auto p-4">
+						{report.console.length === 0 ? (
+							<p className="py-4 text-center text-sm text-subtle">
+								{t("bug_report_viewer.console_empty")}
+							</p>
+						) : (
+							<div className="space-y-2">
+								{report.console.map((entry, i) => (
+									// biome-ignore lint/suspicious/noArrayIndexKey: console entries have no stable key
+									<ConsoleLogEntry key={i} entry={entry} />
+								))}
+							</div>
+						)}
+					</div>
+				</div>
+
+				{/* Boundary Error */}
+				{report.boundaryError && (
+					<div className="rounded-lg border-2 border-red-500/40 bg-surface shadow-lg">
+						<div className="border-b border-red-500/20 bg-red-500/5 px-6 py-4">
+							<div className="flex items-center gap-3">
+								<AlertTriangle className="h-5 w-5 text-red-500" />
+								<h2 className="text-xl font-semibold text-heading">
+									{t("bug_report_viewer.section_boundary_error")}
+								</h2>
+							</div>
+						</div>
+						<div className="flex flex-col gap-4 p-6">
+							<div>
+								<p className="mb-1 text-xs font-semibold uppercase tracking-wider text-subtle">
+									{t("bug_report_viewer.boundary_error_message")}
+								</p>
+								<p className="font-mono text-sm text-body break-all">
+									{report.boundaryError.message}
+								</p>
+							</div>
+							{report.boundaryError.stack && (
+								<div>
+									<p className="mb-2 text-xs font-semibold uppercase tracking-wider text-subtle">
+										{t("bug_report_viewer.stack_trace")}
+									</p>
+									<pre className="overflow-x-auto rounded-lg border border-border-primary bg-surface-muted p-4 font-mono text-xs text-body whitespace-pre-wrap">
+										{report.boundaryError.stack}
+									</pre>
+								</div>
+							)}
+							{report.boundaryError.componentStack && (
+								<details>
+									<summary className="cursor-pointer text-xs font-semibold uppercase tracking-wider text-subtle hover:text-muted">
+										{t("bug_report_viewer.component_stack")}
+									</summary>
+									<pre className="mt-2 overflow-x-auto rounded-lg border border-border-primary bg-surface-muted p-4 font-mono text-xs text-subtle whitespace-pre-wrap">
+										{report.boundaryError.componentStack}
+									</pre>
+								</details>
+							)}
+						</div>
+					</div>
+				)}
+
+				{/* Environment */}
+				<div className="rounded-lg border-2 border-border-primary bg-surface shadow-lg">
+					<div className="border-b border-border-primary bg-surface-muted px-6 py-4">
+						<div className="flex items-center gap-3">
+							<Layers className="h-5 w-5 text-heading" />
+							<h2 className="text-xl font-semibold text-heading">
+								{t("bug_report_viewer.section_environment")}
+							</h2>
+						</div>
+					</div>
+					<div className="p-6">
+						<div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+							<MetaField
+								label={t("bug_report_viewer.meta_user_agent")}
+								value={report.meta.userAgent}
+								mono
+							/>
+							<MetaField
+								label={t("bug_report_viewer.meta_language")}
+								value={report.meta.language}
+							/>
+							<MetaField
+								label={t("bug_report_viewer.meta_screen")}
+								value={report.meta.screenResolution}
+							/>
+							<MetaField
+								label={t("bug_report_viewer.meta_viewport")}
+								value={report.meta.viewport}
+							/>
+							<MetaField
+								label={t("bug_report_viewer.meta_timezone")}
+								value={report.meta.timezone}
+							/>
+						</div>
+						{report.meta.router.matches.length > 0 && (
+							<div className="mt-6">
+								<h3 className="mb-3 text-sm font-semibold text-heading">
+									{t("bug_report_viewer.meta_router_matches")}
+								</h3>
+								<div className="space-y-2">
+									{report.meta.router.matches.map((match, i) => (
+										<div
+											// biome-ignore lint/suspicious/noArrayIndexKey: router matches have no stable key
+											key={i}
+											className="rounded-md border border-border-primary bg-surface-muted px-4 py-3"
+										>
+											<div className="flex items-center gap-3">
+												<span className="font-mono text-xs text-subtle">
+													{match.id}
+												</span>
+												<span className="text-xs text-faint">→</span>
+												<span className="font-mono text-sm text-body">
+													{match.pathname}
+												</span>
+											</div>
+										</div>
+									))}
+								</div>
+							</div>
+						)}
+					</div>
+				</div>
+
+				{/* Rendering */}
+				{ccData.rendering !== undefined && (
+					<div className="rounded-lg border-2 border-border-primary bg-surface shadow-lg">
+						<div className="border-b border-border-primary bg-surface-muted px-6 py-4">
+							<div className="flex items-center gap-3">
+								<Sliders className="h-5 w-5 text-heading" />
+								<h2 className="text-xl font-semibold text-heading">
+									{t("bug_report_viewer.section_rendering")}
+								</h2>
+							</div>
+						</div>
+						<div className="p-6">
+							<div className="mb-4 flex flex-wrap items-center gap-3">
+								<span className="text-xs font-semibold uppercase tracking-wider text-subtle">
+									{t("bug_report_viewer.rendering_renderer_key")}
+								</span>
+								<code className="rounded border border-border-primary bg-surface-muted px-2 py-0.5 font-mono text-sm text-body">
+									{ccData.rendering?.cardBackRenderer ??
+										t("bug_report_viewer.rendering_none")}
+								</code>
+								{ccData.rendering?.resolvedConfig !== null ? (
+									<span className="flex items-center gap-1.5 rounded-full bg-green-500/10 px-3 py-0.5 text-xs font-medium text-green-500">
+										<CircleCheck className="h-3.5 w-3.5" />
+										{t("bug_report_viewer.rendering_resolved")}
+									</span>
+								) : (
+									<span className="flex items-center gap-1.5 rounded-full bg-red-500/10 px-3 py-0.5 text-xs font-medium text-red-500">
+										<CircleAlert className="h-3.5 w-3.5" />
+										{t("bug_report_viewer.rendering_unresolved")}
+									</span>
+								)}
+							</div>
+							{ccData.rendering?.resolvedConfig !== null && (
+								<pre className="max-h-64 overflow-auto rounded-lg border border-border-primary bg-surface-muted p-4 font-mono text-xs text-body">
+									{JSON.stringify(ccData.rendering?.resolvedConfig, null, 2)}
+								</pre>
+							)}
+						</div>
+					</div>
+				)}
+
+				{/* Screenshot */}
+				<div className="rounded-lg border-2 border-border-primary bg-surface shadow-lg">
+					<div className="border-b border-border-primary bg-surface-muted px-6 py-4">
+						<div className="flex items-center gap-3">
+							<Monitor className="h-5 w-5 text-heading" />
+							<h2 className="text-xl font-semibold text-heading">
+								{t("bug_report_viewer.section_screenshot")}
+							</h2>
+						</div>
+					</div>
+					<div className="p-6">
+						{report.screenshot ? (
+							<img
+								src={report.screenshot}
+								alt={t("bug_report_viewer.screenshot_alt")}
+								className="w-full rounded-lg border border-border-primary"
+							/>
+						) : (
+							<div className="flex h-32 items-center justify-center rounded-lg border-2 border-dashed border-border-primary">
+								<p className="text-sm text-subtle">
+									{t("bug_report_viewer.screenshot_none")}
+								</p>
+							</div>
+						)}
+					</div>
+				</div>
+
+				{/* Store State */}
+				<CollapsibleJsonSection
+					title={t("bug_report_viewer.section_store")}
+					icon={<Database className="h-5 w-5 text-heading" />}
+					data={ccData.store}
+					expanded={storeExpanded}
+					onToggle={() => setStoreExpanded((v) => !v)}
+					itemsLabel={t("bug_report_viewer.items")}
+					action={
+						<RestoreButton
+							label={t("bug_report_viewer.restore_store")}
+							loading={restoringStore}
+							onClick={handleRestoreStore}
+						/>
+					}
+				/>
+
+				{/* Gallery */}
+				<div className="space-y-2">
+					{!Array.isArray(ccData.gallery) && ccData.gallery.truncated && (
+						<div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-500">
+							<AlertTriangle className="h-4 w-4 flex-shrink-0" />
+							{t("bug_report_viewer.gallery_truncated", {
+								count: ccData.gallery.truncated.omittedCards,
+							})}
+						</div>
+					)}
+					<CollapsibleJsonSection
+						title={t("bug_report_viewer.section_gallery")}
+						icon={<Images className="h-5 w-5 text-heading" />}
+						data={ccData.gallery}
+						expanded={galleryExpanded}
+						onToggle={() => setGalleryExpanded((v) => !v)}
+						count={galleryCards.length}
+						itemsLabel={t("bug_report_viewer.items")}
+						action={
+							<RestoreButton
+								label={t("bug_report_viewer.restore_gallery")}
+								loading={restoringGallery}
+								onClick={handleRestoreGallery}
+							/>
+						}
+					/>
+				</div>
+			</div>
+		</div>
+	);
+}

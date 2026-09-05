@@ -1,0 +1,84 @@
+.renderedContent {
+    max-width: 100%;
+    line-height: 1.18;
+    word-wrap: break-word !important;
+    overflow-wrap: break-word !important
+}
+
+.renderedContent>* {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    text-align: left;
+    display: block
+}
+
+.renderedContent p {
+    margin: 0;
+    padding: 0
+}
+
+.renderedContent li p {
+    display: inline
+}
+
+.renderedContent p+p {
+    margin-top: var(--paragraph-spacing, .65em)
+}
+
+:is(.renderedContent:has(p+p), .renderedContent:has(br), .renderedContent:has(ul), .renderedContent:has(ol)) {
+    width: 100%
+}
+
+.renderedContent br {
+    line-height: inherit
+}
+
+.renderedContent strong {
+    font-family: palatino_lt_stdbold, serif;
+    font-weight: 400;
+    font-size: var(--bold-font-size, 1em);
+    letter-spacing: var(--bold-letter-spacing, 0em)
+}
+
+.renderedContent em {
+    font-family: palatino_lt_italic, serif;
+    font-style: normal;
+    font-size: var(--italic-font-size, .97em);
+    letter-spacing: var(--italic-letter-spacing, .0128em)
+}
+
+.renderedContent em strong,
+.renderedContent strong em {
+    font-family: palatino_lt_stdbold_italic, serif
+}
+
+.renderedContent ul {
+    margin: 0;
+    padding-left: 0;
+    list-style: none
+}
+
+.renderedContent ul li {
+    margin-left: 1.2em;
+    position: relative
+}
+
+.renderedContent ul li:before {
+    content: "•";
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    position: absolute;
+    top: 0;
+    left: -1.2em
+}
+
+.renderedContent p:empty {
+    margin: 0;
+    padding: 0;
+    display: none
+}
+
+.renderedContent p:only-child:empty {
+    display: none
+}

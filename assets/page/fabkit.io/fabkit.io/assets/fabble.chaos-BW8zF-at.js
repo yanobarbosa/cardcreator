@@ -1,0 +1,2 @@
+import{n as e}from"./chunk-B3K2TuZy.js";import{a as t,t as n}from"./compiler-runtime-4XzsAixn.js";import"./useStore-DYx3-od8.js";import"./analytics-061K8zg0.js";import"./portal-CtSeHqeD.js";import"./RulesDialog-IIyYWVTB.js";import{t as r}from"./PlayScreen-BzmIV3b0.js";import"./fabble-2V7t2wkP.js";import"./rainbow-hint-BKHGGy24.js";var i=n(),a=e(t()),o=()=>{let e=(0,i.c)(1),t;return e[0]===Symbol.for(`react.memo_cache_sentinel`)?(t=(0,a.jsx)(r,{mode:`chaos`}),e[0]=t):t=e[0],t};export{o as component};
+//# sourceMappingURL=fabble.chaos-BW8zF-at.js.map

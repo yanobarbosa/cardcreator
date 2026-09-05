@@ -1,0 +1,4 @@
+import { describe, expect, it } from 'vitest';
+import { createCard, type Card, type StorageAdapter } from '@card-forge/core';
+class MemoryStorageAdapter implements StorageAdapter { private cards=new Map<string,Card>(); async saveCard(card:Card){this.cards.set(card.id,card)} async loadCard(id:string){return this.cards.get(id)??null} async listCards(){return [...this.cards.values()]} async deleteCard(id:string){this.cards.delete(id)} }
+describe('StorageAdapter contract',()=>{it('saves, loads, lists and deletes',async()=>{const storage=new MemoryStorageAdapter(),card=createCard('fab','fab-classic');await storage.saveCard(card);expect((await storage.loadCard(card.id))?.id).toBe(card.id);expect(await storage.listCards()).toHaveLength(1);await storage.deleteCard(card.id);expect(await storage.loadCard(card.id)).toBeNull()})});

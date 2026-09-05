@@ -1,0 +1,32 @@
+.sine-wave {
+    fill: none;
+    stroke: var(--color-primary);
+    stroke-width: 4px;
+    stroke-linecap: round;
+    stroke-dasharray: 2000;
+    stroke-dashoffset: 2000px;
+    animation: 3s ease-in-out forwards drawSineWave
+}
+
+.timeline-dot {
+    fill: var(--color-secondary);
+    opacity: 0;
+    animation: 4s ease-in-out 3s infinite fadeDot
+}
+
+@keyframes drawSineWave {
+    to {
+        stroke-dashoffset: 0
+    }
+}
+
+@keyframes fadeDot {
+    0%,
+    to {
+        opacity: 0
+    }
+    10%,
+    90% {
+        opacity: 1
+    }
+}

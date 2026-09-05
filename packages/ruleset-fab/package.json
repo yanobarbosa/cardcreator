@@ -1,0 +1,1 @@
+{ "name": "@card-forge/ruleset-fab", "version": "0.1.0", "type": "module", "exports": "./src/index.ts", "dependencies": { "@card-forge/core": "workspace:*" }, "scripts": { "build": "tsc -p tsconfig.json", "test": "vitest run" } }

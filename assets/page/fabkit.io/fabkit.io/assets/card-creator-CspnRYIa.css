@@ -1,0 +1,29 @@
+.fab-icon {
+    vertical-align: -.07em;
+    cursor: pointer;
+    -webkit-user-select: all;
+    user-select: all;
+    pointer-events: none;
+    background-position: bottom;
+    background-repeat: no-repeat;
+    background-size: 88%;
+    width: .9em;
+    max-width: .88em;
+    height: .9em;
+    max-height: .88em;
+    margin-left: .07em;
+    display: inline-block
+}
+
+.fab-icon+.fab-icon {
+    margin-left: 0
+}
+
+.fab-dash {
+    vertical-align: .25em;
+    background-color: currentColor;
+    width: .72em;
+    height: .07em;
+    min-height: 1px;
+    display: inline-block
+}

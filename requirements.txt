@@ -1,0 +1,1705 @@
+Estamos iniciando um novo projeto chamado **Card Forge**.
+
+Quero que você implemente a **Fase 1 / versão 0.1**, que será a fundação arquitetural de um aplicativo de criação e gerenciamento de cartas para um TCG próprio.
+
+Leia todos os requisitos abaixo antes de começar.
+
+## CONTEXTO
+
+O projeto utilizará inicialmente a estrutura de cartas de Flesh and Blood como primeiro ruleset, mas **o aplicativo não pode ser acoplado a Flesh and Blood**.
+
+No futuro deverão existir:
+
+* ruleset FAB;
+* ruleset próprio;
+* outros rulesets;
+* Obsidian;
+* PWA;
+* biblioteca;
+* templates personalizados;
+* deck builder;
+* playtest.
+
+Portanto, esta fase deve priorizar arquitetura e extensibilidade.
+
+---
+
+# STACK
+
+Use preferencialmente:
+
+* TypeScript;
+* React;
+* Vite;
+* pnpm;
+* Vitest;
+* CSS responsivo;
+* IndexedDB para persistência.
+
+Pode usar uma biblioteca pequena e madura para IndexedDB caso isso simplifique a implementação.
+
+Evite dependências desnecessárias.
+
+Não use Electron.
+
+Não faça o Core depender do navegador, React ou Obsidian.
+
+---
+
+# ESTRUTURA
+
+Quero uma estrutura modular semelhante a:
+
+```text
+card-forge/
+│
+├── apps/
+│   └── web/
+│
+├── packages/
+│   ├── core/
+│   ├── renderer/
+│   ├── ruleset-fab/
+│   ├── storage/
+│   ├── ui/
+│   └── shared/
+│
+├── assets/
+│   └── placeholders/
+│
+├── docs/
+│
+├── package.json
+└── README.md
+```
+
+Pode ajustar a estrutura se houver uma razão técnica forte, mas preserve a separação conceitual.
+
+---
+
+# REGRA MAIS IMPORTANTE
+
+Existem quatro áreas que NÃO podem ser misturadas:
+
+```text
+Card Data
+Ruleset
+Template / Renderer
+UI
+```
+
+Além disso, persistência deve ser acessada através de adapters.
+
+---
+
+# CORE
+
+Implemente modelos TypeScript para pelo menos:
+
+```ts
+Card
+CardMetadata
+ArtworkConfig
+CardTemplate
+TemplateLayer
+Ruleset
+CardTypeDefinition
+FieldDefinition
+ValidationResult
+```
+
+Modelo base aproximado:
+
+```ts
+interface Card {
+  id: string;
+
+  rulesetId: string;
+
+  name: string;
+
+  type: string;
+  subtypes: string[];
+  supertypes: string[];
+
+  classes: string[];
+  talents: string[];
+
+  pitch?: number;
+  cost?: number;
+  power?: number;
+  defense?: number;
+
+  life?: number;
+  intellect?: number;
+
+  rulesText: string;
+
+  rarity?: string;
+  setId?: string;
+  collectorNumber?: string;
+  artist?: string;
+
+  artwork?: ArtworkConfig;
+
+  templateId: string;
+
+  metadata: CardMetadata;
+}
+```
+
+Não transforme propriedades específicas do FAB em lógica do Core.
+
+O Core apenas deve conseguir armazená-las.
+
+---
+
+# RULESET SYSTEM
+
+Implemente uma API para rulesets.
+
+Algo conceitualmente semelhante a:
+
+```ts
+interface Ruleset {
+  id: string;
+  name: string;
+
+  cardTypes: CardTypeDefinition[];
+
+  fields: FieldDefinition[];
+
+  validate(card: Card): ValidationResult[];
+}
+```
+
+O ruleset deve controlar quais campos aparecem para cada tipo de carta.
+
+Não faça condicionais do tipo:
+
+```ts
+if (card.type === "hero")
+```
+
+espalhadas pela aplicação.
+
+A definição deve vir do ruleset.
+
+---
+
+# RULESET FAB
+
+Crie um primeiro ruleset chamado:
+
+```text
+fab
+```
+
+Ele deve suportar inicialmente:
+
+```text
+Hero
+Weapon
+Equipment
+Action
+Attack Action
+Attack Reaction
+Defense Reaction
+Instant
+Token
+Mentor
+Resource
+```
+
+Campos possíveis:
+
+```text
+Name
+Type
+Subtype
+Supertype
+Class
+Talent
+Pitch
+Cost
+Power
+Defense
+Life
+Intellect
+Rules Text
+Rarity
+Set
+Collector Number
+Artist
+```
+
+Cada tipo deve determinar quais campos serão exibidos.
+
+Exemplo:
+
+Attack Action:
+
+```text
+Name
+Class
+Talent
+Pitch
+Cost
+Power
+Defense
+Rules Text
+```
+
+Hero:
+
+```text
+Name
+Class
+Talent
+Subtype
+Intellect
+Life
+Rules Text
+```
+
+Equipment:
+
+```text
+Name
+Class
+Talent
+Subtype
+Defense
+Rules Text
+```
+
+Essas definições devem estar centralizadas no ruleset.
+
+---
+
+# VALIDATION
+
+Implemente validação estrutural simples.
+
+Por exemplo:
+
+```text
+Card sem Name → error
+
+Hero sem Life → warning/error
+
+Hero sem Intellect → warning
+
+Attack Action sem Power → warning
+
+Template inexistente → error
+
+Tipo desconhecido → error
+```
+
+Estrutura:
+
+```ts
+interface ValidationResult {
+  severity: "info" | "warning" | "error";
+
+  code: string;
+
+  message: string;
+
+  field?: string;
+}
+```
+
+Não implemente interpretação das Comprehensive Rules nesta fase.
+
+---
+
+# TEMPLATE SYSTEM
+
+Implemente:
+
+```ts
+interface CardTemplate {
+  id: string;
+  name: string;
+
+  width: number;
+  height: number;
+
+  layers: TemplateLayer[];
+}
+```
+
+Layers iniciais:
+
+```text
+image
+artwork
+text
+shape
+stat
+```
+
+Cada layer deve possuir pelo menos:
+
+```text
+id
+type
+x
+y
+width
+height
+zIndex
+visible
+```
+
+Text/stat layers devem conseguir obter um valor da carta.
+
+Exemplo:
+
+```text
+card.name
+card.cost
+card.power
+card.rulesText
+```
+
+Não coloque coordenadas dentro do objeto Card.
+
+---
+
+# RENDERER
+
+Implemente o primeiro renderer usando **SVG**.
+
+Ele deve receber:
+
+```text
+Card
++
+CardTemplate
+```
+
+e gerar o preview.
+
+Não crie markup exclusivo para Attack Action, Hero etc.
+
+O template deve comandar a composição.
+
+Crie um template placeholder genérico suficientemente bom para validar o sistema.
+
+Ele deve mostrar pelo menos:
+
+* arte/placeholder;
+* nome;
+* tipo;
+* rules text;
+* cost quando existir;
+* pitch quando existir;
+* power quando existir;
+* defense quando existir;
+* life quando existir;
+* intellect quando existir.
+
+Se o campo não existir na carta, não mostrar o elemento correspondente.
+
+---
+
+# ARTWORK
+
+Implemente inicialmente:
+
+```ts
+interface ArtworkConfig {
+  source?: string;
+
+  positionX: number;
+  positionY: number;
+
+  scale: number;
+  rotation: number;
+
+  cropMode: "cover" | "contain" | "manual";
+}
+```
+
+Nesta versão basta:
+
+* selecionar imagem local;
+* mostrar no preview;
+* zoom básico;
+* posição X/Y básica.
+
+Não implemente filtros de imagem.
+
+---
+
+# STORAGE
+
+Crie:
+
+```ts
+interface StorageAdapter {
+  saveCard(card: Card): Promise<void>;
+
+  loadCard(id: string): Promise<Card | null>;
+
+  listCards(): Promise<Card[]>;
+
+  deleteCard(id: string): Promise<void>;
+}
+```
+
+Implemente um:
+
+```text
+IndexedDBStorageAdapter
+```
+
+A UI não pode acessar IndexedDB diretamente.
+
+Isso é obrigatório porque futuramente criaremos:
+
+```text
+ObsidianVaultStorageAdapter
+```
+
+---
+
+# EDITOR
+
+Crie uma tela funcional de edição.
+
+Desktop:
+
+```text
+Editor | Preview
+```
+
+O usuário deve conseguir alterar:
+
+* Name;
+* Type;
+* Classes;
+* Talents;
+* Subtypes;
+* Pitch;
+* Cost;
+* Power;
+* Defense;
+* Life;
+* Intellect;
+* Rules Text;
+* Rarity;
+* Set;
+* Collector Number;
+* Artist.
+
+A lista de campos deve mudar automaticamente conforme o tipo selecionado.
+
+O preview deve atualizar em tempo real.
+
+---
+
+# MOBILE
+
+Não apenas comprima o desktop.
+
+Crie layout responsivo.
+
+No celular:
+
+```text
+Preview
+
+[mostrar/recolher]
+
+Dados básicos
+Estatísticas
+Texto
+Arte
+Metadados
+```
+
+Pode utilizar accordions ou seções recolhíveis.
+
+O preview deve continuar utilizável em telas estreitas.
+
+Teste pelo menos:
+
+```text
+360px
+390px
+768px
+desktop
+```
+
+---
+
+# CARD LIBRARY SIMPLES
+
+Nesta fase faça apenas uma biblioteca básica.
+
+Deve permitir:
+
+```text
+New Card
+Open Card
+Save Card
+Delete Card
+Duplicate Card
+```
+
+Pode exibir:
+
+```text
+Name
+Type
+Status
+Updated At
+```
+
+Não implementar filtros avançados ainda.
+
+---
+
+# DADOS DE TESTE
+
+Inclua três cartas fictícias para validar tipos diferentes.
+
+## Attack Action
+
+```text
+Arc Lightning
+Attack Action
+
+Cost: 1
+Pitch: 2
+Power: 5
+Defense: 3
+
+When this attacks, ...
+```
+
+## Hero
+
+```text
+Aria, Stormbound
+Hero
+
+Intellect: 4
+Life: 40
+
+Once per Turn Action — ...
+```
+
+## Equipment
+
+```text
+Stormforged Gauntlet
+Equipment — Arms
+
+Defense: 2
+
+Battleworn
+...
+```
+
+Use somente assets genéricos/placeholders.
+
+---
+
+# NÃO IMPLEMENTAR AINDA
+
+Não implemente:
+
+* Obsidian;
+* editor visual de template;
+* banco de cartas oficial;
+* scraping;
+* importação do CardVault;
+* deck builder;
+* playtest;
+* login;
+* backend;
+* cloud;
+* multiplayer;
+* exportação PDF;
+* impressão;
+* IA;
+* filtros avançados;
+* versionamento completo;
+* frames oficiais.
+
+Esses recursos serão fases futuras.
+
+---
+
+# PREPARAÇÃO PARA OBSIDIAN
+
+Embora o Obsidian não seja implementado agora:
+
+* não utilize APIs exclusivas de Node no Core;
+* não acople dados ao IndexedDB;
+* mantenha storage através de adapter;
+* não acople renderer a uma página específica;
+* mantenha componentes reutilizáveis;
+* mantenha paths/IDs independentes de filesystem.
+
+Queremos reutilizar o máximo possível posteriormente dentro de uma `ItemView` do Obsidian.
+
+---
+
+# TESTES
+
+Crie testes para pelo menos:
+
+1. criação de Card;
+
+2. ruleset retornando os campos corretos;
+
+3. validação de Hero;
+
+4. validação de Attack Action;
+
+5. template recebendo dados;
+
+6. StorageAdapter;
+
+7. salvar e carregar carta;
+
+8. campos condicionais.
+
+---
+
+# README
+
+Crie um README contendo:
+
+* objetivo;
+* arquitetura;
+* packages;
+* instalação;
+* desenvolvimento;
+* build;
+* testes;
+* decisões arquiteturais;
+* roadmap resumido.
+
+Inclua explicitamente:
+
+```text
+Card data is independent from presentation.
+
+Rulesets are independent from the core.
+
+Storage is accessed through adapters.
+
+The web application is only one client of the Card Forge core.
+```
+
+---
+
+# CRITÉRIOS DE ACEITE
+
+Considere a Fase 1 concluída somente se:
+
+* `pnpm install` funcionar;
+* o projeto iniciar localmente;
+* houver build sem erros;
+* os testes passarem;
+* o usuário conseguir criar uma carta;
+* mudar o tipo alterar os campos;
+* alterar valores atualizar o preview;
+* salvar persistir a carta;
+* recarregar a página preservar a carta;
+* abrir uma carta salva funcionar;
+* duplicar funcionar;
+* excluir funcionar;
+* desktop funcionar;
+* mobile funcionar;
+* Card não possuir coordenadas de layout;
+* Ruleset FAB não estiver no Core;
+* IndexedDB não for acessado diretamente pela UI;
+* Renderer não estiver acoplado ao formulário;
+* seja possível adicionar teoricamente um segundo ruleset sem modificar o Core.
+
+---
+
+# IMPORTANTE DURANTE A IMPLEMENTAÇÃO
+
+Não tente antecipar todas as funcionalidades futuras.
+
+Priorize:
+
+```text
+arquitetura limpa
++
+fundação funcional
++
+extensibilidade
+```
+
+em vez de quantidade de features.
+
+Se encontrar uma decisão arquitetural que possa dificultar posteriormente:
+
+```text
+Obsidian
+Templates customizados
+Segundo ruleset
+Exportação
+```
+
+prefira a solução extensível.
+
+Ao terminar:
+
+1. apresente a árvore final do projeto;
+
+2. explique as principais decisões;
+
+3. liste os arquivos criados;
+
+4. informe como executar;
+
+5. informe como testar;
+
+6. liste limitações conhecidas;
+
+7. não avance para a próxima fase sem antes termos validado esta implementação.
+# Card Forge
+
+## Especificação inicial — Arquitetura e versão 0.1
+
+### 1. Visão do projeto
+
+**Card Forge** será uma aplicação para criação, organização e posterior playtest de cartas de um TCG próprio.
+
+A primeira implementação utilizará a estrutura de **Flesh and Blood** como ruleset de referência, porém o aplicativo não deve ser programado especificamente para um único jogo.
+
+A arquitetura deve permitir que, futuramente, existam múltiplos rulesets:
+
+* Flesh and Blood;
+* Nosso TCG;
+* Rulesets experimentais;
+* Rulesets criados pelo usuário.
+
+A aplicação deverá funcionar prioritariamente como:
+
+* aplicação web responsiva;
+* PWA instalável;
+* desktop;
+* dispositivos móveis.
+
+A arquitetura também deve permitir integração futura com **Obsidian**, utilizando o mesmo núcleo de dados, renderer e componentes sempre que possível.
+
+---
+
+# 2. Princípios arquiteturais
+
+O projeto deve seguir algumas regras fundamentais.
+
+## 2.1 Dados da carta separados da aparência
+
+Uma carta não deve armazenar coordenadas ou informações específicas de layout.
+
+Exemplo de dados:
+
+```ts
+{
+  name: "Arc Lightning",
+  type: "attack-action",
+  cost: 1,
+  power: 5,
+  defense: 3
+}
+```
+
+O template é responsável por saber onde essas informações aparecem.
+
+Fluxo:
+
+```text
+Card Data
+    ↓
+Template
+    ↓
+Renderer
+    ↓
+Preview / PNG / WebP / impressão
+```
+
+---
+
+## 2.2 Ruleset separado do Core
+
+O Core não deve saber o que é:
+
+* Attack Action;
+* Hero;
+* Pitch;
+* Intellect;
+* Equipment;
+* Lightning;
+* Guardian;
+* Warrior.
+
+Esses conceitos pertencem a um ruleset.
+
+Exemplo:
+
+```text
+Core
+├── Cards
+├── Templates
+├── Renderer
+├── Storage
+├── Validation
+└── Ruleset API
+
+Rulesets
+├── FAB
+└── Custom
+```
+
+---
+
+## 2.3 Armazenamento abstrato
+
+Nenhum componente React deve acessar diretamente:
+
+```text
+localStorage
+IndexedDB
+filesystem
+Obsidian Vault
+```
+
+Deve existir uma interface comum.
+
+Exemplo:
+
+```ts
+interface StorageAdapter {
+  saveCard(card: Card): Promise<void>;
+  loadCard(id: string): Promise<Card | null>;
+  deleteCard(id: string): Promise<void>;
+  listCards(): Promise<Card[]>;
+}
+```
+
+Implementações futuras:
+
+```text
+IndexedDBStorageAdapter
+ObsidianVaultStorageAdapter
+FileSystemStorageAdapter
+```
+
+Isso permitirá que o mesmo editor funcione no navegador e no Obsidian.
+
+---
+
+# 3. Estrutura sugerida do projeto
+
+Preferencialmente usar monorepo.
+
+```text
+card-forge/
+│
+├── apps/
+│   ├── web/
+│   └── obsidian/              # futuro
+│
+├── packages/
+│   ├── core/
+│   ├── renderer/
+│   ├── ruleset-fab/
+│   ├── storage/
+│   ├── ui/
+│   └── shared/
+│
+├── assets/
+│   ├── templates/
+│   ├── fonts/
+│   ├── icons/
+│   └── placeholders/
+│
+├── docs/
+│
+├── package.json
+└── README.md
+```
+
+Sugestão de stack:
+
+```text
+TypeScript
+React
+Vite
+pnpm
+CSS responsivo
+Vitest
+IndexedDB
+```
+
+Evitar dependências específicas de Electron ou Node no Core.
+
+---
+
+# 4. Modelos principais
+
+## 4.1 Card
+
+Modelo base sugerido:
+
+```ts
+interface Card {
+  id: string;
+
+  rulesetId: string;
+
+  name: string;
+
+  type: string;
+  subtypes: string[];
+  supertypes: string[];
+
+  classes: string[];
+  talents: string[];
+
+  pitch?: number;
+  cost?: number;
+  power?: number;
+  defense?: number;
+  life?: number;
+  intellect?: number;
+
+  rulesText: string;
+
+  rarity?: string;
+
+  setId?: string;
+  collectorNumber?: string;
+
+  artist?: string;
+
+  artwork?: ArtworkConfig;
+
+  templateId: string;
+
+  metadata: CardMetadata;
+}
+```
+
+---
+
+## 4.2 CardMetadata
+
+```ts
+interface CardMetadata {
+  status:
+    | "draft"
+    | "testing"
+    | "approved"
+    | "deprecated";
+
+  source:
+    | "official-reference"
+    | "custom";
+
+  createdAt: string;
+  updatedAt: string;
+
+  tags: string[];
+
+  notes?: string;
+}
+```
+
+---
+
+# 5. Artwork
+
+A arte da carta deverá possuir configuração própria.
+
+```ts
+interface ArtworkConfig {
+  source?: string;
+
+  positionX: number;
+  positionY: number;
+
+  scale: number;
+  rotation: number;
+
+  cropMode:
+    | "cover"
+    | "contain"
+    | "manual";
+}
+```
+
+Posteriormente poderão existir:
+
+```text
+brightness
+contrast
+saturation
+blur
+filters
+masks
+```
+
+Esses campos não precisam ser implementados na versão 0.1.
+
+---
+
+# 6. Template
+
+O template será composto por layers.
+
+```ts
+interface CardTemplate {
+  id: string;
+
+  name: string;
+  rulesetId?: string;
+
+  width: number;
+  height: number;
+
+  layers: TemplateLayer[];
+}
+```
+
+Tipos iniciais de layer:
+
+```text
+image
+artwork
+text
+shape
+stat
+```
+
+Estrutura aproximada:
+
+```ts
+interface TemplateLayer {
+  id: string;
+
+  type:
+    | "image"
+    | "artwork"
+    | "text"
+    | "shape"
+    | "stat";
+
+  x: number;
+  y: number;
+
+  width: number;
+  height: number;
+
+  zIndex: number;
+
+  visible: boolean;
+
+  condition?: string;
+}
+```
+
+Posteriormente as condições devem poder expressar ideias como:
+
+```text
+show if card.pitch exists
+show if card.type == hero
+show if card.power exists
+show if card.talents contains lightning
+```
+
+---
+
+# 7. Renderer
+
+O renderer não deve estar acoplado à tela do editor.
+
+Recomendação inicial:
+
+**SVG como superfície primária de renderização.**
+
+Motivos:
+
+* textos permanecem nítidos;
+* escala sem perda;
+* clipping da artwork;
+* layers simples;
+* posicionamento absoluto preciso;
+* fácil renderização no navegador;
+* possibilidade de converter posteriormente para PNG/WebP.
+
+O renderer recebe:
+
+```text
+Card
++
+Template
+```
+
+e produz:
+
+```text
+SVG / Preview
+```
+
+Posteriormente:
+
+```text
+PNG
+WebP
+PDF
+```
+
+---
+
+# 8. Ruleset API
+
+Criar uma interface para rulesets.
+
+Exemplo conceitual:
+
+```ts
+interface Ruleset {
+  id: string;
+  name: string;
+
+  cardTypes: CardTypeDefinition[];
+
+  fields: FieldDefinition[];
+
+  rarities: OptionDefinition[];
+
+  validate(card: Card): ValidationResult[];
+}
+```
+
+Cada tipo de carta poderá dizer quais campos utiliza.
+
+Exemplo:
+
+```ts
+{
+  id: "attack-action",
+  label: "Attack Action",
+
+  fields: [
+    "name",
+    "classes",
+    "talents",
+    "pitch",
+    "cost",
+    "power",
+    "defense",
+    "rulesText"
+  ]
+}
+```
+
+Hero:
+
+```ts
+{
+  id: "hero",
+  label: "Hero",
+
+  fields: [
+    "name",
+    "classes",
+    "talents",
+    "subtypes",
+    "intellect",
+    "life",
+    "rulesText"
+  ]
+}
+```
+
+Isso deve controlar automaticamente a interface.
+
+---
+
+# 9. Interface
+
+## Desktop
+
+Layout preferido:
+
+```text
+┌──────────────────────────────────────────────┐
+│ Card Forge                                   │
+├─────────────────────┬────────────────────────┤
+│                     │                        │
+│ Editor              │                        │
+│                     │       Preview          │
+│ Nome                │                        │
+│ Tipo                │        CARTA           │
+│ Classe              │                        │
+│ Custo               │                        │
+│ Poder               │                        │
+│ Texto               │                        │
+│                     │                        │
+├─────────────────────┴────────────────────────┤
+│ Save / Duplicate / Export                    │
+└──────────────────────────────────────────────┘
+```
+
+O preview deve permanecer facilmente visível.
+
+---
+
+# 10. Mobile
+
+A interface mobile não deve ser apenas a interface desktop comprimida.
+
+Modelo sugerido:
+
+```text
+┌───────────────────┐
+│      Preview      │
+│                   │
+│       CARTA       │
+└───────────────────┘
+
+[ Recolher preview ]
+
+Dados básicos
+──────────────
+Nome
+Tipo
+Classe
+
+Estatísticas
+──────────────
+Pitch
+Cost
+Power
+Defense
+
+Texto
+──────────────
+
+Arte
+──────────────
+
+Dados internos
+──────────────
+```
+
+Usar seções expansíveis.
+
+O preview poderá alternar entre:
+
+```text
+fixo
+compacto
+oculto
+```
+
+---
+
+# 11. Primeira implementação do ruleset FAB
+
+O objetivo desta etapa não é reproduzir todas as regras do jogo.
+
+A estrutura inicial deverá suportar pelo menos:
+
+```text
+Hero
+Weapon
+Equipment
+Action
+Attack Action
+Attack Reaction
+Defense Reaction
+Instant
+Token
+Mentor
+Resource
+```
+
+Tipos adicionais poderão ser acrescentados sem modificar o Core.
+
+Campos disponíveis:
+
+```text
+Name
+Type
+Subtype
+Supertype
+Class
+Talent
+Pitch
+Cost
+Power
+Defense
+Life
+Intellect
+Rules Text
+Rarity
+Set
+Collector Number
+Artist
+```
+
+---
+
+# 12. Validação
+
+Na versão inicial, validação será estrutural.
+
+Exemplos:
+
+```text
+Attack Action sem Power
+Hero sem Life
+Hero sem Intellect
+Card sem Name
+Template inexistente
+Tipo desconhecido
+```
+
+Resultado:
+
+```ts
+interface ValidationResult {
+  severity:
+    | "info"
+    | "warning"
+    | "error";
+
+  code: string;
+  message: string;
+
+  field?: string;
+}
+```
+
+Não tentar implementar interpretação completa das regras de Flesh and Blood nesta fase.
+
+---
+
+# 13. Biblioteca
+
+A biblioteca completa será implementada posteriormente, mas a arquitetura deve prever:
+
+```text
+Search
+Filters
+Grid
+List
+Table
+Duplicate
+Versions
+Sets
+Tags
+Status
+```
+
+Na versão 0.1 basta existir uma lista simples das cartas locais.
+
+---
+
+# 14. Versionamento futuro
+
+Cada carta futuramente poderá possuir versões:
+
+```text
+Arc Lightning
+
+v1
+v2
+v3
+```
+
+Com estados:
+
+```text
+Draft
+Testing
+Approved
+Deprecated
+```
+
+Não implementar histórico completo na versão 0.1.
+
+Apenas garantir que o modelo não impeça essa implementação futura.
+
+---
+
+# 15. Integração futura com Obsidian
+
+O aplicativo deve estar preparado para que futuramente:
+
+```text
+Card
+↔
+Markdown Note
+```
+
+Exemplo:
+
+```yaml
+---
+cardforge: true
+id: arc-lightning
+ruleset: custom
+type: attack-action
+cost: 1
+power: 5
+defense: 3
+status: testing
+template: attack-default
+---
+```
+
+O corpo da nota poderá conter:
+
+```markdown
+## Rules Text
+
+When this attacks...
+
+## Design Notes
+
+Primeira versão.
+```
+
+O Obsidian não será implementado na versão 0.1.
+
+Mas nenhuma decisão arquitetural deve impedir sua implementação posterior.
+
+---
+
+# 16. Assets
+
+Na fase inicial usar:
+
+* frames genéricos;
+* símbolos genéricos;
+* placeholders;
+* arte fornecida pelo usuário.
+
+Os assets visuais de outros jogos devem permanecer separados do Core.
+
+Estrutura:
+
+```text
+assets/
+└── rulesets/
+    ├── fab/
+    └── custom/
+```
+
+---
+
+# 17. Escopo da versão 0.1
+
+## Deve possuir
+
+### Projeto
+
+* React;
+* TypeScript;
+* Vite;
+* estrutura modular;
+* lint;
+* testes;
+* arquitetura preparada para PWA/mobile.
+
+### Core
+
+* Card;
+* CardTemplate;
+* TemplateLayer;
+* ArtworkConfig;
+* Ruleset;
+* ValidationResult.
+
+### Ruleset
+
+* implementação inicial `ruleset-fab`;
+* tipos básicos;
+* definição condicional dos campos;
+* validação estrutural básica.
+
+### Editor
+
+* criar carta;
+* alterar tipo;
+* preencher campos;
+* campos mudarem conforme tipo;
+* preview atualizado instantaneamente.
+
+### Renderer
+
+* renderização SVG;
+* frame placeholder;
+* artwork placeholder;
+* nome;
+* rules text;
+* estatísticas;
+* layers.
+
+### Persistência
+
+* salvar cartas localmente;
+* carregar carta;
+* listar cartas;
+* excluir carta.
+
+Preferencialmente IndexedDB.
+
+### Responsividade
+
+* desktop;
+* tablet;
+* mobile.
+
+---
+
+# 18. O que NÃO implementar na versão 0.1
+
+Não implementar agora:
+
+* editor visual de templates;
+* banco completo das cartas oficiais;
+* importação automática do CardVault;
+* deck builder;
+* playtest;
+* PDF;
+* folha de impressão;
+* versionamento completo;
+* Obsidian;
+* multiplayer;
+* login;
+* servidor;
+* sincronização em nuvem;
+* inteligência artificial;
+* interpretação automática de regras;
+* filtros avançados de imagem.
+
+Esses recursos pertencem às próximas fases.
+
+---
+
+# 19. Dados de demonstração
+
+Criar pelo menos três cartas fictícias.
+
+### Attack Action
+
+```text
+Arc Lightning
+
+Attack Action
+Cost 1
+Pitch 2
+Power 5
+Defense 3
+
+When this attacks, ...
+```
+
+### Hero
+
+```text
+Aria, Stormbound
+
+Hero
+
+Intellect 4
+Life 40
+
+Once per Turn Action — ...
+```
+
+### Equipment
+
+```text
+Stormforged Gauntlet
+
+Equipment — Arms
+Defense 2
+
+Battleworn
+...
+```
+
+Nenhuma dessas cartas precisa usar assets oficiais.
+
+---
+
+# 20. Critérios de aceite da versão 0.1
+
+A fase estará concluída quando:
+
+1. O projeto iniciar com um único comando.
+
+2. O usuário conseguir criar uma carta.
+
+3. Alterar o tipo da carta modificar automaticamente os campos disponíveis.
+
+4. Alterar um valor atualizar instantaneamente o preview.
+
+5. O renderer usar dados + template, e não markup específico da carta.
+
+6. Uma carta puder ser salva.
+
+7. Fechar e abrir a aplicação não apagar as cartas salvas.
+
+8. Uma carta salva puder ser aberta novamente.
+
+9. A aplicação funcionar corretamente em viewport mobile.
+
+10. O Core não depender de React.
+
+11. O Core não depender de Obsidian.
+
+12. O ruleset FAB não estiver misturado ao Core.
+
+13. O renderer não estiver misturado ao formulário.
+
+14. Nenhum componente acessar diretamente o mecanismo de persistência.
+
+15. O código estiver preparado para receber posteriormente um segundo ruleset.
+
+---
+
+# 21. Objetivo final da arquitetura
+
+A arquitetura deverá permitir futuramente:
+
+```text
+                ┌───────────────┐
+                │   Card Data   │
+                └───────┬───────┘
+                        │
+            ┌───────────┴───────────┐
+            │                       │
+      Ruleset FAB             Nosso Ruleset
+            │                       │
+            └───────────┬───────────┘
+                        │
+                 Template Engine
+                        │
+                    Renderer
+                        │
+       ┌────────────────┼────────────────┐
+       │                │                │
+      Web             PWA            Obsidian
+```
+
+A aplicação deve ser construída pensando nesse objetivo desde a primeira versão.
