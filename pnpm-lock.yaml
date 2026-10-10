@@ -60,8 +60,8 @@ importers:
         specifier: ^3.30.3
         version: 3.31.4
       '@zumer/snapdom':
-        specifier: ^2.24.10
-        version: 2.24.18
+        specifier: ^3.3.0
+        version: 3.3.0
       dexie:
         specifier: ^4.4.5
         version: 4.4.6
@@ -1644,8 +1644,8 @@ packages:
       oxc-transform-react:
         optional: true
 
-  '@zumer/snapdom@2.24.18':
-    resolution: {integrity: sha512-wMw8lNY5l0pyarAv8jbe5ayOmrR2OUnK5KLtCwuhcLhFv88d2Y38Sertb+d9pn5g20Cet4eLCRXd3yFHcWiDIQ==}
+  '@zumer/snapdom@3.3.0':
+    resolution: {integrity: sha512-DR4HnXp5vlLDymmAE5z/QWzxtsc+wrpjo/QXvj5R377wKarwpCQO2LzUuQjWhJaMDNAyCjvxJB4EN8Zgs8Ri9w==}
 
   acorn@8.19.0:
     resolution: {integrity: sha512-oJlA3XiRm7Cyk6qFD2Jn8ak9B7jSy0qy00ADO3+8dpT0LSjFihQYv4C02LFCSYJV3Q37xYwwRy5m+IpIiUzqWw==}
@@ -4679,7 +4679,7 @@ snapshots:
       '@rolldown/plugin-babel': 0.2.4(@babel/core@7.29.7)(@babel/runtime@7.29.10)(rolldown-vite@7.3.1(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)(@types/node@26.6.5)(jiti@2.7.0)(terser@5.51.2))(rolldown@1.0.0-beta.53(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3))
       babel-plugin-react-compiler: 1.0.0
 
-  '@zumer/snapdom@2.24.18': {}
+  '@zumer/snapdom@3.3.0': {}
 
   acorn@8.19.0: {}
 
