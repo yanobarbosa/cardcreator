@@ -1,3 +1,39 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
 node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Compiler generated files
+src/routeTree.gen.ts
+src/i18n.d.ts
+analyse.html
+.tanstack/
+dev-dist/
+CHANGELOG.md
+
+# Local AI files
+.claude/settings.local.json
+.claude/worktrees/
+.claude/plans/
+.playwright-mcp/
 .edge-debug/
-.vscode/

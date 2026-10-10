@@ -1,4 +1,4 @@
-import { CardThumbnail } from "@fabkit/apps/card-creator/components/gallery/CardThumbnail";
+﻿import { CardThumbnail } from "@fabkit/apps/card-creator/components/gallery/CardThumbnail";
 import { DeleteFolderConfirmDialog } from "@fabkit/apps/card-creator/components/gallery/DeleteFolderConfirmDialog";
 import { FileUploadButton } from "@fabkit/apps/card-creator/components/gallery/FileUploadButton.tsx";
 import { FolderBreadcrumbs } from "@fabkit/apps/card-creator/components/gallery/FolderBreadcrumbs";

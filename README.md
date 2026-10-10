@@ -1,24 +1,43 @@
-# Card Forge
+# FABKIT Card Creator
 
-Card Forge is a local-first, extensible TCG card editor. Version 0.1 implements a FAB ruleset, template-driven preview, and browser-local persistence.
+This repository now uses the open-source FABKIT card creator as its base. The focus here is creating Flesh and Blood cards, managing the local gallery, and producing higher resolution exports. The FABKIT source is licensed under BSD 3-Clause; see [LICENSE.md](LICENSE.md).
 
-## Run
+## Development
 
-Requires Node.js 20+ and pnpm. From the repository root (Corepack is bundled with modern Node versions):
+Requires Node.js 20+ and pnpm.
 
 ```bash
 corepack pnpm install
 corepack pnpm dev
 ```
 
-Open the URL printed by Vite. If `pnpm` is globally available, `pnpm dev` also works. Use `corepack pnpm test` or `corepack pnpm build` to validate the workspace.
+Create a production build with:
 
-## Architecture
+```bash
+corepack pnpm build
+```
 
-- `packages/core`: framework-independent card, template, ruleset, validation, and repository interfaces.
-- `packages/ruleset-fab`: FAB field definitions and validation only.
-- `packages/renderer`: template data consumed by the web preview.
-- `packages/storage`: IndexedDB repository adapter.
-- `apps/web`: React editor and library; it only uses the repository abstraction.
+## Export resolution
 
-The application includes sample Attack Action, Hero, and Equipment cards. Artwork is deliberately a generated placeholder area; no official art is bundled.
+Card exports use a 3× raster scale. A standard card renderer SVG is approximately 375 × 523 px, so the resulting PNG is approximately 1125 × 1569 px. Uploaded artwork resolution still depends on the source image.
+
+## Firebase Hosting
+
+`firebase.json` serves the production build from `dist`.
+
+```bash
+firebase login
+firebase use --add
+corepack pnpm build
+firebase deploy --only hosting
+```
+
+Firebase project selection and credentials stay local; this repository does not contain a project ID.
+
+## Assets
+
+- `public/`: FABKIT fonts, symbols, rarities, and card backgrounds used by the app.
+- `assets/`: original card artwork assets retained from this project.
+- `assets/page/fabkit.io/`: retained card creator reference source and cardback artwork capture.
+
+The FABKIT site tools outside card creation have been removed from the app source.

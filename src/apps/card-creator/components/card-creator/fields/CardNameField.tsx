@@ -1,0 +1,22 @@
+import { useIsFieldVisible } from "@fabkit/apps/card-creator/components/utils.ts";
+import { useCardCreator } from "@fabkit/apps/card-creator/stores/card-creator.ts";
+import TextInput from "@fabkit/platform/components/form/TextInput";
+import { useTranslation } from "react-i18next";
+
+export function CardNameField() {
+	const { t } = useTranslation("card-creator");
+	const CardName = useCardCreator((state) => state.CardName);
+	const setCardName = useCardCreator((state) => state.setCardName);
+	const shouldShow = useIsFieldVisible("CardName");
+
+	if (!shouldShow) return null;
+
+	return (
+		<TextInput
+			label={t("card_creator.name_label")}
+			value={CardName || ""}
+			onChange={setCardName}
+			maxLength={50}
+		/>
+	);
+}

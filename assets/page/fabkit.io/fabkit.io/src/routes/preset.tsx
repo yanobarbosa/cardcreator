@@ -1,4 +1,4 @@
-import { loadPresetLink } from "@fabkit/apps/card-creator/preset-link/preset-link.ts";
+﻿import { loadPresetLink } from "@fabkit/apps/card-creator/preset-link/preset-link.ts";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
