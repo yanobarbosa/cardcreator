@@ -9,6 +9,7 @@
 		"postbuild": "tsc -b",
 		"build": "vite build",
 		"preview": "vite preview",
+		"deploy:hosting": "pnpm build && firebase deploy --only hosting",
 		"test": "bun test tests/",
 		"lint": "biome check",
 		"format": "biome check --write"
